@@ -7,12 +7,14 @@
 #include "EEPROM.h"
 
 static const char AP_NAME[] = "revspace-espnow";
+static const uint16_t LONG_PRESS_DELAY = 1500; // milliseconds
 
 typedef enum {
     E_SEND,
     E_ACK,
     E_DISCOVER,
-    E_SLEEP
+    E_SLEEP,
+    E_LONG_PRESS
 } skip_mode_t;
 
 static skip_mode_t mode = E_SEND;
@@ -60,7 +62,7 @@ static void send_topic_text(uint8_t *mac, const char *topic, const char *text)
 
 static bool valid_peer(struct WifiEspNowPeerInfo *peer)
 {
-    return (peer->channel >= 1) && (peer->channel <= 14); 
+    return (peer->channel >= 1) && (peer->channel <= 14);
 }
 
 void loop(void)
@@ -124,11 +126,34 @@ void loop(void)
         mode = E_SLEEP;
         break;
 
+    // sorry, I am lazy and I replaced deepsleep by regular delay
+
     case E_SLEEP:
     default:
         Serial.printf("Going to sleep...was awake for %ld millis", millis());
-        ESP.deepSleep(0, WAKE_RF_DEFAULT);
+        delay(LONG_PRESS_DELAY);
+        mode = E_LONG_PRESS;
         break;
+
+    // sorry, I am lazy and just copypasted the anove
+
+    case E_LONG_PRESS:
+        // read last known receiver info from EEPROM
+        EEPROM.get(0, recv);
+        if (valid_peer(&recv)) {
+            // send SKIP message to last known address
+            Serial.printf(line, "Sending STOP to %02X:%02X:%02X:%02X:%02X:%02X (chan %d)...",
+                    recv.mac[0], recv.mac[1], recv.mac[2], recv.mac[3], recv.mac[4], recv.mac[5], recv.channel);
+
+            WifiEspNow.addPeer(recv.mac, recv.channel, nullptr);
+            send_topic_text(recv.mac, "revspace/button/stop", "stop");
+
+            mode = E_ACK;
+        } else {
+            mode = E_DISCOVER;
+        }
+        break;
+
+        // yes, it's an infinite loop. It wil skip every 1.5 seconds as long as you hold the button
     }
 }
-
